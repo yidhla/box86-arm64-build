@@ -1,25 +1,55 @@
-name: Build Box86 ARM
+name: Get Wine + Build Box64
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04-arm
+  get-wine:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
+      - name: Download wine i386
         run: |
+          sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake gcc-arm-linux-gnueabihf
-      - name: Build
+          mkdir -p /tmp/wine-debs
+          cd /tmp/wine-debs
+          apt-get download wine32:i386 libwine:i386 2>&1
+          ls -la
+
+      - name: Extract
         run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc -DARM_DYNAREC=1
-          make -j$(nproc)
+          mkdir -p /tmp/wine-libs
+          for deb in /tmp/wine-debs/*.deb; do
+            [ -f "$deb" ] && dpkg-deb -x "$deb" /tmp/wine-libs/ 2>/dev/null || true
+          done
+          find /tmp/wine-libs -name 'ntdll.so' -o -name 'libwine.so.1' -o -name 'wineserver'
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: box86-arm32
-          path: build/box86
+          name: wine-standard-libs
+          path: /tmp/wine-libs/
+
+  build-box64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout box64
+        uses: actions/checkout@v4
+        with:
+          repository: ptitSeb/box64
+          path: box64
+
+      - name: Build box64
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake gcc
+          mkdir -p box64/build && cd box64/build
+          cmake .. -DARM64=1
+          make -j$(nproc)
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: box64-arm64
+          path: box64/build/box64
