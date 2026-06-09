@@ -1,61 +1,32 @@
-name: Build Box64 + Get Wine Libs v3
+name: Build Box64 + Get Wine20 Libs
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  get-wine:
+  get-wine20:
     runs-on: ubuntu-latest
     steps:
-      - name: Download wine i386
+      - name: Extract wine from Ubuntu 20.04 Docker
         run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update -qq
-          mkdir -p /tmp/debs
-          cd /tmp/debs
-          apt-get download wine32:i386 libwine:i386 2>&1
-
-      - name: List ALL files
-        run: |
-          mkdir -p /tmp/wc
-          for deb in /tmp/debs/*.deb; do
-            echo "=== $deb ==="
-            dpkg-deb -x "$deb" /tmp/wc/ 2>/dev/null
-          done
-          echo "=== ALL FILES ==="
-          find /tmp/wc -type f | sort
-
-      - name: Extract with correct paths
-        run: |
-          mkdir -p /tmp/wine-out/lib/wine
-          # 查找实际路径
-          NTDLL=$(find /tmp/wc -name 'ntdll.so' -type f | head -1)
-          WINE=$(find /tmp/wc -name 'wine' -type f | head -3 | tail -1)
-          PRELOADER=$(find /tmp/wc -name 'wine-preloader' -type f | head -1)
-          WS=$(find /tmp/wc -name 'wineserver' -type f | head -1)
-          LIBWINE=$(find /tmp/wc -name 'libwine.so.1' -type f | head -1)
-          LIBWINE0=$(find /tmp/wc -name 'libwine.so.1.0' -type f | head -1)
-          echo "ntdll: $NTDLL"
-          echo "wine: $WINE"
-          echo "preloader: $PRELOADER"
-          echo "wineserver: $WS"
-          echo "libwine.so.1: $LIBWINE"
-          echo "libwine.so.1.0: $LIBWINE0"
-          # 复制
-          [ -n "$NTDLL" ] && cp -v "$NTDLL" /tmp/wine-out/lib/wine/
-          [ -n "$WINE" ] && cp -v "$WINE" /tmp/wine-out/
-          [ -n "$PRELOADER" ] && cp -v "$PRELOADER" /tmp/wine-out/
-          [ -n "$WS" ] && cp -v "$WS" /tmp/wine-out/
-          [ -n "$LIBWINE" ] && cp -v "$LIBWINE" /tmp/wine-out/lib/
-          [ -n "$LIBWINE0" ] && cp -v "$LIBWINE0" /tmp/wine-out/lib/
+          cat > /tmp/Dockerfile << 'EOF'
+FROM ubuntu:20.04
+RUN dpkg --add-architecture i386 && apt-get update -qq && apt-get install -y -qq wine32:i386 libwine:i386 2>&1 | tail -3
+RUN mkdir -p /out/lib/wine &&     cp -v /usr/lib/i386-linux-gnu/wine/i386-unix/ntdll.so /out/lib/wine/ &&     cp -v /usr/lib/i386-linux-gnu/libwine.so.1 /out/lib/ 2>/dev/null;     cp -v /usr/lib/i386-linux-gnu/libwine.so.1.0 /out/lib/ 2>/dev/null;     cp -v /usr/bin/wine /out/ 2>/dev/null;     cp -v /usr/bin/wine-preloader /out/ 2>/dev/null;     find /usr/lib -name 'wineserver' -exec cp -v {} /out/ \; ;     echo "=== DONE ==="
+EOF
+          docker build -t wine20-extract /tmp/ --no-cache 2>&1 | tail -5
+          docker create --name wine20 wine20-extract
+          mkdir -p /tmp/wine-out
+          docker cp wine20:/out/. /tmp/wine-out/
+          docker rm wine20
           echo "=== EXTRACTED ==="
           find /tmp/wine-out -type f -exec ls -lh {} \;
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: wine-core-libs
+          name: wine20-libs
           path: /tmp/wine-out/
 
   build-box64:
@@ -70,7 +41,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq cmake gcc
           mkdir -p box64/build && cd box64/build
-          cmake .. -DARM64=1
+          cmake .. -DARM64=1 -DCMAKE_C_FLAGS="-static-libgcc -static-libstdc++"
           make -j$(nproc)
       - name: Upload
         uses: actions/upload-artifact@v4
