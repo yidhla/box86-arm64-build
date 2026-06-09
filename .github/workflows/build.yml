@@ -1,4 +1,4 @@
-name: Build Box64 + Wine from Source
+name: Build Box64 (Docker ubuntu:20.04)
 on:
   push:
     branches: [main]
@@ -8,64 +8,22 @@ jobs:
   build-box64:
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Build box64
+      - name: Build box64 in Docker ubuntu:20.04
         run: |
-          cat > /tmp/Dockerfile << 'DEOF'
-FROM arm64v8/ubuntu:20.04
-RUN apt-get update -qq && apt-get install -y -qq cmake gcc git make
-RUN git clone --depth=1 https://github.com/ptitSeb/box64.git /src
-RUN mkdir -p /src/build && cd /src/build && \
-    cmake .. -DARM64=1 -DCMAKE_BUILD_TYPE=Release && \
-    make -j$(nproc)
-DEOF
-          docker build -t box64-builder /tmp/ --no-cache 2>&1 | tail -3
-          docker create --name box64-tmp box64-builder
+          docker pull arm64v8/ubuntu:20.04
+          docker run --name box64-builder arm64v8/ubuntu:20.04 bash -c "
+            apt-get update -qq && apt-get install -y -qq cmake gcc git make &&
+            git clone --depth=1 https://github.com/ptitSeb/box64.git /src &&
+            mkdir -p /src/build && cd /src/build &&
+            cmake .. -DARM64=1 -DCMAKE_BUILD_TYPE=Release &&
+            make -j$(nproc)"
           mkdir -p /tmp/out
-          docker cp box64-tmp:/src/build/box64 /tmp/out/
-          docker rm box64-tmp
+          docker cp box64-builder:/src/build/box64 /tmp/out/
+          docker rm box64-builder
           file /tmp/out/box64
-          strings /tmp/out/box64 | grep 'GLIBC_2' | sort -u | tail -3
 
-      - name: Upload box64
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: box64-final
           path: /tmp/out/
-
-  build-wine:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Build wine from source
-        run: |
-          cat > /tmp/Dockerfile << 'DEOF'
-FROM arm64v8/ubuntu:20.04
-RUN dpkg --add-architecture i386 && apt-get update -qq
-RUN apt-get install -y -qq gcc-i686-linux-gnu g++-i686-linux-gnu \
-    libc6-dev-i386-cross build-essential flex bison 2>&1 | tail -3
-RUN apt-get install -y -qq libx11-dev:i386 libfreetype6-dev:i386 \
-    libfontconfig1-dev:i386 2>&1 | tail -3
-RUN git clone --depth=1 --branch wine-8.0 https://gitlab.winehq.org/wine/wine.git /wine-src
-RUN cd /wine-src && ./configure --host=i686-linux-gnu --without-x --without-freetype \
-    --without-fontconfig --without-alsa --without-pulse --without-cups \
-    --without-gstreamer --without-gphoto --without-sane --without-v4l \
-    --disable-tests 2>&1 | tail -5
-RUN cd /wine-src && make -j$(nproc) 2>&1 | tail -5
-DEOF
-          docker build -t wine-builder /tmp/ --no-cache 2>&1 | tail -3
-          docker create --name wine-tmp wine-builder
-          mkdir -p /tmp/wine-out
-          # Extract what we need
-          docker cp wine-tmp:/wine-src/libs/wine/libwine.so.1 /tmp/wine-out/ 2>/dev/null
-          docker cp wine-tmp:/wine-src/dlls/ntdll/ntdll.so /tmp/wine-out/ 2>/dev/null
-          # Also get the full build DLLs
-          docker cp wine-tmp:/wine-src/dlls/. /tmp/wine-out/dlls/ 2>/dev/null
-          # Find all built files
-          docker exec wine-tmp find /wine-src -name '*.so' -path '*/dlls/*' | head -20
-          docker rm wine-tmp
-          ls -lh /tmp/wine-out/
-
-      - name: Upload wine
-        uses: actions/upload-artifact@v4
-        with:
-          name: wine-final
-          path: /tmp/wine-out/
