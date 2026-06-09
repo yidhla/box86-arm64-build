@@ -1,4 +1,4 @@
-name: Get Wine + Build Box64
+name: Build Box64 + Get Wine Libs
 on:
   push:
     branches: [main]
@@ -12,30 +12,37 @@ jobs:
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          mkdir -p /tmp/wine-debs
-          cd /tmp/wine-debs
+          mkdir -p /tmp/debs
+          cd /tmp/debs
           apt-get download wine32:i386 libwine:i386 2>&1
-          ls -la
 
-      - name: Extract
+      - name: Extract core libs only
         run: |
-          mkdir -p /tmp/wine-libs
-          for deb in /tmp/wine-debs/*.deb; do
-            [ -f "$deb" ] && dpkg-deb -x "$deb" /tmp/wine-libs/ 2>/dev/null || true
+          mkdir -p /tmp/wine-core
+          for deb in /tmp/debs/*.deb; do
+            [ -f "$deb" ] && dpkg-deb -x "$deb" /tmp/wine-core/ 2>/dev/null || true
           done
-          find /tmp/wine-libs -name 'ntdll.so' -o -name 'libwine.so.1' -o -name 'wineserver'
+          # 只保留关键文件
+          mkdir -p /tmp/wine-out/lib/wine
+          cp -v /tmp/wine-core/usr/lib/i386-linux-gnu/wine/i386-unix/ntdll.so /tmp/wine-out/lib/wine/i386-unix/ 2>/dev/null || true
+          cp -v /tmp/wine-core/usr/lib/i386-linux-gnu/libwine.so.1 /tmp/wine-out/lib/ 2>/dev/null || true
+          cp -v /tmp/wine-core/usr/lib/i386-linux-gnu/libwine.so.1.0 /tmp/wine-out/lib/ 2>/dev/null || true
+          cp -v /tmp/wine-core/usr/bin/wine /tmp/wine-out/ 2>/dev/null || true
+          cp -v /tmp/wine-core/usr/bin/wine-preloader /tmp/wine-out/ 2>/dev/null || true
+          find /tmp/wine-core -name 'wineserver' -exec cp -v {} /tmp/wine-out/ \; 2>/dev/null || true
+          echo "=== Extracted files ==="
+          find /tmp/wine-out -type f -exec ls -lh {} \;
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: wine-standard-libs
-          path: /tmp/wine-libs/
+          name: wine-core-libs
+          path: /tmp/wine-out/
 
   build-box64:
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Checkout box64
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           repository: ptitSeb/box64
           path: box64
