@@ -1,4 +1,4 @@
-name: Build Box64 + Get Wine Libs
+name: Build Box64 + Get Wine Libs v3
 on:
   push:
     branches: [main]
@@ -16,21 +16,40 @@ jobs:
           cd /tmp/debs
           apt-get download wine32:i386 libwine:i386 2>&1
 
-      - name: Extract core libs only
+      - name: List ALL files
         run: |
-          mkdir -p /tmp/wine-core
+          mkdir -p /tmp/wc
           for deb in /tmp/debs/*.deb; do
-            [ -f "$deb" ] && dpkg-deb -x "$deb" /tmp/wine-core/ 2>/dev/null || true
+            echo "=== $deb ==="
+            dpkg-deb -x "$deb" /tmp/wc/ 2>/dev/null
           done
-          # 只保留关键文件
+          echo "=== ALL FILES ==="
+          find /tmp/wc -type f | sort
+
+      - name: Extract with correct paths
+        run: |
           mkdir -p /tmp/wine-out/lib/wine
-          cp -v /tmp/wine-core/usr/lib/i386-linux-gnu/wine/i386-unix/ntdll.so /tmp/wine-out/lib/wine/i386-unix/ 2>/dev/null || true
-          cp -v /tmp/wine-core/usr/lib/i386-linux-gnu/libwine.so.1 /tmp/wine-out/lib/ 2>/dev/null || true
-          cp -v /tmp/wine-core/usr/lib/i386-linux-gnu/libwine.so.1.0 /tmp/wine-out/lib/ 2>/dev/null || true
-          cp -v /tmp/wine-core/usr/bin/wine /tmp/wine-out/ 2>/dev/null || true
-          cp -v /tmp/wine-core/usr/bin/wine-preloader /tmp/wine-out/ 2>/dev/null || true
-          find /tmp/wine-core -name 'wineserver' -exec cp -v {} /tmp/wine-out/ \; 2>/dev/null || true
-          echo "=== Extracted files ==="
+          # 查找实际路径
+          NTDLL=$(find /tmp/wc -name 'ntdll.so' -type f | head -1)
+          WINE=$(find /tmp/wc -name 'wine' -type f | head -3 | tail -1)
+          PRELOADER=$(find /tmp/wc -name 'wine-preloader' -type f | head -1)
+          WS=$(find /tmp/wc -name 'wineserver' -type f | head -1)
+          LIBWINE=$(find /tmp/wc -name 'libwine.so.1' -type f | head -1)
+          LIBWINE0=$(find /tmp/wc -name 'libwine.so.1.0' -type f | head -1)
+          echo "ntdll: $NTDLL"
+          echo "wine: $WINE"
+          echo "preloader: $PRELOADER"
+          echo "wineserver: $WS"
+          echo "libwine.so.1: $LIBWINE"
+          echo "libwine.so.1.0: $LIBWINE0"
+          # 复制
+          [ -n "$NTDLL" ] && cp -v "$NTDLL" /tmp/wine-out/lib/wine/
+          [ -n "$WINE" ] && cp -v "$WINE" /tmp/wine-out/
+          [ -n "$PRELOADER" ] && cp -v "$PRELOADER" /tmp/wine-out/
+          [ -n "$WS" ] && cp -v "$WS" /tmp/wine-out/
+          [ -n "$LIBWINE" ] && cp -v "$LIBWINE" /tmp/wine-out/lib/
+          [ -n "$LIBWINE0" ] && cp -v "$LIBWINE0" /tmp/wine-out/lib/
+          echo "=== EXTRACTED ==="
           find /tmp/wine-out -type f -exec ls -lh {} \;
 
       - name: Upload
@@ -46,7 +65,6 @@ jobs:
         with:
           repository: ptitSeb/box64
           path: box64
-
       - name: Build box64
         run: |
           sudo apt-get update -qq
@@ -54,7 +72,6 @@ jobs:
           mkdir -p box64/build && cd box64/build
           cmake .. -DARM64=1
           make -j$(nproc)
-
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
