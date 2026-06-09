@@ -1,50 +1,67 @@
-name: Build Box64 + Get Wine20 Libs
+name: Get Box64 + Standard Wine
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  get-wine20:
-    runs-on: ubuntu-latest
+  get-wine:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Extract wine from Ubuntu 20.04 Docker
+      - name: Download wine from Ubuntu 20.04 archive
         run: |
-          cat > /tmp/Dockerfile << 'EOF'
-FROM ubuntu:20.04
-RUN dpkg --add-architecture i386 && apt-get update -qq && apt-get install -y -qq wine32:i386 libwine:i386 2>&1 | tail -3
-RUN mkdir -p /out/lib/wine &&     cp -v /usr/lib/i386-linux-gnu/wine/i386-unix/ntdll.so /out/lib/wine/ &&     cp -v /usr/lib/i386-linux-gnu/libwine.so.1 /out/lib/ 2>/dev/null;     cp -v /usr/lib/i386-linux-gnu/libwine.so.1.0 /out/lib/ 2>/dev/null;     cp -v /usr/bin/wine /out/ 2>/dev/null;     cp -v /usr/bin/wine-preloader /out/ 2>/dev/null;     find /usr/lib -name 'wineserver' -exec cp -v {} /out/ \; ;     echo "=== DONE ==="
-EOF
-          docker build -t wine20-extract /tmp/ --no-cache 2>&1 | tail -5
-          docker create --name wine20 wine20-extract
-          mkdir -p /tmp/wine-out
-          docker cp wine20:/out/. /tmp/wine-out/
-          docker rm wine20
-          echo "=== EXTRACTED ==="
-          find /tmp/wine-out -type f -exec ls -lh {} \;
+          # Direct download from archive.ubuntu.com pool
+          mkdir -p /tmp/wine-pkgs /tmp/wine-out
+          cd /tmp/wine-pkgs
+          wget -q http://archive.ubuntu.com/ubuntu/pool/universe/w/wine/libwine_5.0-3ubuntu1_i386.deb
+          wget -q http://archive.ubuntu.com/ubuntu/pool/universe/w/wine/wine32_5.0-3ubuntu1_i386.deb
+          
+          # Extract
+          for deb in *.deb; do
+            dpkg-deb -x "$deb" /tmp/wine-out/ 2>/dev/null
+          done
+          
+          # Find ntdll.so and related files
+          find /tmp/wine-out -name '*.so' -exec ls -lh {} \; 2>/dev/null
+          find /tmp/wine-out -name 'wine' -type f -exec ls -lh {} \; 2>/dev/null
+          find /tmp/wine-out -name 'wineserver' -exec ls -lh {} \; 2>/dev/null
 
-      - name: Upload
+      - name: Check GLIBC requirements
+        run: |
+          for f in $(find /tmp/wine-out -name 'ntdll.so'); do
+            echo "=== $f ==="
+            objdump -p "$f" 2>/dev/null | grep NEEDED || true
+            strings "$f" | grep -i 'glibc' | head -3
+          done
+
+      - name: Upload wine libs
         uses: actions/upload-artifact@v4
         with:
-          name: wine20-libs
+          name: wine-standard-libs
           path: /tmp/wine-out/
 
   build-box64:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ptitSeb/box64
-          path: box64
-      - name: Build box64
+      - name: Cross-compile box64 for ARM64
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake gcc
-          mkdir -p box64/build && cd box64/build
-          cmake .. -DARM64=1 -DCMAKE_C_FLAGS="-static-libgcc -static-libstdc++"
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu cmake make git
+          git clone --depth=1 https://github.com/ptitSeb/box64.git /tmp/box64-src
+          mkdir -p /tmp/box64-src/build && cd /tmp/box64-src/build
+          cmake .. -DARM64=1 -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_BUILD_TYPE=Release
           make -j$(nproc)
+          echo "=== BUILD RESULT ==="
+          file box64
+          ls -lh box64
+
+      - name: Check GLIBC requirements
+        run: |
+          objdump -p /tmp/box64-src/build/box64 2>/dev/null | grep NEEDED
+          strings /tmp/box64-src/build/box64 | grep 'GLIBC' | sort -u
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: box64-arm64
-          path: box64/build/box64
+          name: box64-arm64-v2
+          path: /tmp/box64-src/build/box64
