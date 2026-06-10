@@ -1,29 +1,25 @@
-name: Build Box64 (Docker ubuntu:20.04)
+name: Build Box64 (native ARM64)
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-box64:
+  build:
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Build box64 in Docker ubuntu:20.04
-        run: |
-          docker pull arm64v8/ubuntu:20.04
-          docker run --name box64-builder arm64v8/ubuntu:20.04 bash -c "
-            apt-get update -qq && apt-get install -y -qq cmake gcc git make &&
-            git clone --depth=1 https://github.com/ptitSeb/box64.git /src &&
-            mkdir -p /src/build && cd /src/build &&
-            cmake .. -DARM64=1 -DCMAKE_BUILD_TYPE=Release &&
-            make -j$(nproc)"
-          mkdir -p /tmp/out
-          docker cp box64-builder:/src/build/box64 /tmp/out/
-          docker rm box64-builder
-          file /tmp/out/box64
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake gcc git make
+          git clone --depth=1 https://github.com/ptitSeb/box64.git /tmp/box64
+          cd /tmp/box64 && mkdir -p build && cd build
+          cmake .. -DARM64=1 -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+          file box64
+          ls -lh box64
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: box64-final
-          path: /tmp/out/
+          name: box64-arm64-native
+          path: /tmp/box64/build/box64
